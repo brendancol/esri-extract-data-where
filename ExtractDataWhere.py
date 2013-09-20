@@ -313,10 +313,27 @@ if __name__ == '__main__':
         coordinateSystem = gp.getparameterastext(3)
         customCoordSystemFolder = gp.getparameterastext(4)
         outputZipFile = gp.getparameterastext(5).replace("\\",os.sep)
-        where_clauses = gp.getparameterastext(6).split(";")
+
+        # input where clauses
+        where_clauses_text = gp.getparameterastext(6)
+
+        # use '*' or '1=1' to get all features from all layers
+        if not where_clauses_text or where_clauses_text in ['1=1', '*']:
+            where_clauses = [None] * len(layers)
+
+        # use 'all:' keyword to apply where clause to all layers in service
+        elif 'all:' in where_clauses_text:
+            where = where_clauses_text.split(':')[1]
+            where_clauses = [where] * len(layers)
+
+        # supply one where clause for each layer in corresponding order
+        else:
+            where_clauses = filter(None, where_clauses.split(";"))
 
         if len(layers) != len(where_clauses):
-            raise ValueError('You must supply the same number of layers as where clauses.')
+            msg = 'You must supply the same number of layers as where clauses or "*"'
+            gp.AddWarning(msg)
+            raise ValueError('You must supply the same number of layers as where clauses or "*"')
 
         layers_to_where_clause = dict(zip(layers, where_clauses))
 
