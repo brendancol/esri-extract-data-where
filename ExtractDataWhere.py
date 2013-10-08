@@ -5,11 +5,16 @@ import sys
 import traceback
 import zipfile
 import re
+import urllib
+import urlparse
 
 gp = arcgisscripting.create(9.3)
 
 class LicenseError(Exception):
     pass
+
+#Total hack...remove after
+SERVER_VIRTUAL_DIRECTORIES = r'Server virtual directory not set review top of export script'
 
 def setUpCoordSystemEnvironment(coordinateSystem, customCoordSystemFolder):
     # get the correct spatial reference and set it into the environment
@@ -188,25 +193,32 @@ def clipFeatures(lyr, featureFormat, zipFolderPath, scratchFolderPath, convertFe
 
     # get the path and a validated name for the output
     layerName, outputpath = makeOutputPath(False, lyr, convertFeaturesDuringClip, featureFormat, zipFolderPath, scratchFolderPath)
+    arcpy.AddMessage("Starting layer: %s where: %s" % (lyr, where))
+    feature_layer = layerName
+    
+    cleanUpFeatureLayer = True
+    
 
-    if where:
-        feature_layer = layerName
+    try:
         gp.MakeFeatureLayer_management(lyr, feature_layer)
-        cleanUpFeatureLayer = True
         gp.SelectLayerByAttribute_management(feature_layer, "NEW_SELECTION", where)
-
         count = int(arcpy.GetCount_management(feature_layer).getOutput(0))
-        if count == 0:
-            gp.AddWarning("Where clause yielded no records ::  Layer=%s; Clause=%s" % (feature_layer, where))
-            return
-    else:
-        feature_layer = lyr
+        
+    except:
+        gp.AddWarning("Select Attributes Error ::  Layer=%s; Clause=%s" % (feature_layer, where))
+        gp.AddWarning(gp.GetMessages(2))
+        return
+
+    
+    if count == 0:
+        gp.AddWarning("Where clause yielded no records ::  Layer=%s; Clause=%s" % (feature_layer, where))
+        return
 
     try:
 
         # do the clip
+        gp.AddMessage('Ready to copy: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
         gp.CopyFeatures(feature_layer, outputpath)
-        #Message "  clipped %s..."
         gp.AddIDMessage("INFORMATIVE", 86135, feature_layer)
 
         # if format needs data interop, convert with data interop
@@ -245,7 +257,7 @@ def clipFeatures(lyr, featureFormat, zipFolderPath, scratchFolderPath, convertFe
         pass
 
     finally:
-        if cleanUpFeatureLayer:
+        if cleanUpFeatureLayer and gp.Exists(feature_layer):
             arcpy.Delete_management(feature_layer)
 
 
@@ -272,7 +284,7 @@ def clipAndConvert(layersToWhereClause, featureFormat, rasterFormat, coordinateS
             dataType = describe.DataType.lower()
 
             # make sure we are dealing with features or raster and not some other layer type (group, tin, etc)
-            if dataType in ["featurelayer", "rasterlayer"]:
+            if dataType in ["featurelayer", "rasterlayer", "featureclass"]:
                 # if the coordinate system is the same as the input
                 # set the environment to the coord sys of the layer being clipped
                 # may not be necessary, but is a failsafe.
@@ -305,6 +317,13 @@ def clipAndConvert(layersToWhereClause, featureFormat, rasterFormat, coordinateS
 def get_ID_message(ID):
     return re.sub("%1|%2", "%s", gp.GetIDMessage(ID))
 
+def get_results_virtual_path(resultsFilePath):
+    file_url = urlparse.urljoin('file:', urllib.pathname2url(resultsFilePath))
+    if 'directories' in file_url:
+        return SERVER_VIRTUAL_DIRECTORIES + file_url.split(r'directories')[1]
+    else:
+        return file_url
+
 if __name__ == '__main__':
     try:
         layers = gp.getparameterastext(0).split(";")
@@ -312,11 +331,22 @@ if __name__ == '__main__':
         inputRasterFormat = gp.getparameterastext(2)
         coordinateSystem = gp.getparameterastext(3)
         customCoordSystemFolder = gp.getparameterastext(4)
-        outputZipFile = gp.getparameterastext(5).replace("\\",os.sep)
+        outputZipFile = gp.getparameterastext(5)
+
+        if not outputZipFile.endswith('.zip'):
+            outputZipFile += '.zip'
+
+        outputZipFile = os.path.join(gp.scratchworkspace, outputZipFile)
+        output_zip = get_results_virtual_path(outputZipFile)
 
         # input where clauses
         where_clauses_text = gp.getparameterastext(6)
+        arcpy.AddMessage("Workspace: %s" % gp.workspace)
+        gp.setparameterastext(7, output_zip)
+        EXPORT_DATA_DIRECTORY = gp.getparameterastext(8)
 
+        layers = [os.path.join(EXPORT_DATA_DIRECTORY,l) for l in layers]
+        
         # use '*' or '1=1' to get all features from all layers
         if not where_clauses_text or where_clauses_text in ['1=1', '*']:
             where_clauses = [None] * len(layers)
@@ -328,7 +358,7 @@ if __name__ == '__main__':
 
         # supply one where clause for each layer in corresponding order
         else:
-            where_clauses = filter(None, where_clauses.split(";"))
+            where_clauses = filter(None, where_clauses_text.split(";"))
 
         if len(layers) != len(where_clauses):
             msg = 'You must supply the same number of layers as where clauses or "*"'
@@ -375,6 +405,8 @@ if __name__ == '__main__':
                wsid == 'esriDataSourcesGDB.AccessWorkspaceFactory.1' or\
                wsid == 'esriDataSourcesGDB.SdeWorkspaceFactory.1':
                 gp.scratchworkspace = gp.getsystemenvironment("TEMP")
+                
+        gp.AddMessage("Scratch Workspace: %s" % gp.scratchworkspace)
 
         # clip and convert the layers and get the path to the folder we want to zip
         zipFolder = clipAndConvert(layers_to_where_clause, featureFormat, rasterFormat, coordinateSystem)
