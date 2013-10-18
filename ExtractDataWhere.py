@@ -439,6 +439,6 @@ if __name__ == '__main__':
 	if arcpy.GetParameterAsText(0):
 		params = arcgis_parameter_bootstrap()
 		params.result_file = run_export(params)
-		arcpy.SetParameterAsText(7, params.result_file)
+		arcpy.SetParameterAsText(7, virtual_result_file)
 	else:
 		unittest.main()
