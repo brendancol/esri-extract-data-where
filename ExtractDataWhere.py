@@ -15,14 +15,27 @@ class LicenseError(Exception):
 #Total hack...remove after
 SERVER_VIRTUAL_DIRECTORIES = r'Server virtual directory not set review top of export script'
 SCRATCH_FOLDER = os.path.join(os.path.dirname(__file__), 'scratch')
-PROJECTIONS_DIRECTORY = os.path.join(os.path.dirname(__file__), 'projections')
+
+# test constants
 TEST_DATA_FOLDER = os.path.join(os.path.dirname(__file__), 'test_data')
 TEST_DATA_GDB = os.path.join(TEST_DATA_FOLDER, 'test_data.gdb')
 TEST_DATA_SHP = os.path.join(TEST_DATA_FOLDER, 'test_data_shp')
 
-def zipUpFolder(folder, outZipFile):
+# project info
+PROJECTIONS_DIRECTORY = os.path.join(os.path.dirname(__file__), 'projections')
+VALID_PROJECTION_ALIASES = {}
+VALID_PROJECTION_ALIASES['WGS_1984'] = 'WGS_1984.prj'
+VALID_PROJECTION_ALIASES['WGS1984'] = 'WGS_1984.prj'
+VALID_PROJECTION_ALIASES['WGS84'] = 'WGS_1984.prj'
+VALID_PROJECTION_ALIASES['4326'] = 'WGS_1984.prj'
+VALID_PROJECTION_ALIASES['geographic'] = 'WGS_1984.prj'
+
+def create_zipfile(folder, outZipFile):
 	# zip the data
 	try:
+		if not outZipFile.endswith('.zip'):
+			outZipFile += '.zip'
+
 		zip = zipfile.ZipFile(outZipFile, 'w', zipfile.ZIP_DEFLATED)
 		zipws(str(folder), zip, "CONTENTS_ONLY")
 		zip.close()
@@ -59,36 +72,34 @@ def zipws(path, zip, keep):
 					arcpy.AddWarning(get_ID_message(86134) % (file, e[0]))
 	return None
 
-def createFolderInScratch(folderName):
+def create_folder_in_scratch(folderName):
 	# create the folders necessary for the job
 	folderPath = arcpy.CreateUniqueName(folderName, arcpy.env.scratchWorkspace)
 	arcpy.CreateFolder_management(arcpy.env.scratchWorkspace, os.path.basename(folderPath))
 	return folderPath
 
-def getTempLocationPath(folderPath, format, ):
+def get_temp_location_path(folderPath, format, outputDataFolderName='data'):
 	# make sure there is a location to write to for gdb and mdb
 	if format == "mdb":
-		MDBPath = os.path.join(folderPath, "data.mdb")
+		MDBPath = os.path.join(folderPath, outputDataFolderName + ".mdb")
 		if not arcpy.Exists(MDBPath):
-			arcpy.CreatePersonalGDB_management(folderPath, "data")
+			arcpy.CreatePersonalGDB_management(folderPath, outputDataFolderName)
 		return MDBPath
 	elif format == "gdb":
-		GDBPath = os.path.join(folderPath, "data.gdb")
+		GDBPath = os.path.join(folderPath, outputDataFolderName + ".gdb")
 		if not arcpy.Exists(GDBPath):
-			arcpy.CreateFileGDB_management(folderPath, "data")
+			arcpy.CreateFileGDB_management(folderPath, outputDataFolderName)
 		return GDBPath
 	else:
 		return folderPath
 
-def makeOutputPath(raster, inLayerName, convert, formatList, zipFolderPath, scratchFolderPath):
+def make_output_path(raster, inLayerName, outLayerName, convert, formatList, zipFolderPath, scratchFolderPath, outputDataFolderName='data'):
 	outFormat = formatList[1].lower()
 
-	# if we are going to convert to an esri format on the clip, put the output in the zipfolder
-	# else put it in the scratch folder in a gdb
 	if convert:
-		outwkspc = getTempLocationPath(zipFolderPath, outFormat)
+		outwkspc = get_temp_location_path(zipFolderPath, outFormat, outputDataFolderName=outputDataFolderName)
 	else:
-		outwkspc = getTempLocationPath(scratchFolderPath, "gdb")
+		outwkspc = get_temp_location_path(scratchFolderPath, "gdb", outputDataFolderName=outputDataFolderName)
 
 	if inLayerName.find("\\"):
 		inLayerName = inLayerName.split("\\")[-1]
@@ -101,14 +112,14 @@ def makeOutputPath(raster, inLayerName, convert, formatList, zipFolderPath, scra
 			inLayerName = inLayerName.replace(" ", "_")
 
 	# make the output path
-	tmpName = os.path.basename(arcpy.CreateUniqueName(inLayerName, outwkspc))
+	tmpName = os.path.basename(arcpy.CreateUniqueName(outLayerName, outwkspc))
 	tmpName = arcpy.ValidateTableName(tmpName, outwkspc)
 
 	# do some extension housekeeping.
 	# Raster formats and shp always need to put the extension at the end
 	if raster or outFormat == "shp":
 		if outFormat != "gdb" and outFormat != "mdb" and outFormat != "grid":
-			tmpName = tmpName + formatList[2].lower()
+			tmpName += formatList[2].lower()
 
 	outputpath = os.path.join(outwkspc, tmpName)
 
@@ -116,7 +127,7 @@ def makeOutputPath(raster, inLayerName, convert, formatList, zipFolderPath, scra
 
 def clipRaster(lyr, rasterFormat, zipFolderPath, scratchFolderPath):
 	# get the path and a validated name for the output
-	layerName, outputpath = makeOutputPath(True, lyr, True, rasterFormat, zipFolderPath, scratchFolderPath)
+	layerName, outputpath = make_output_path(True, lyr, True, rasterFormat, zipFolderPath, scratchFolderPath)
 	# do the clip
 	try:
 		arcpy.CopyRaster_management(lyr, outputpath)
@@ -138,41 +149,39 @@ def clipRaster(lyr, rasterFormat, zipFolderPath, scratchFolderPath):
 			arcpy.AddWarning(arcpy.GetMessages(2))
 		pass
 
-def clipFeatures(lyr, featureFormat, zipFolderPath, scratchFolderPath, convertFeaturesDuringClip, where=None, name='output_features', projection=None):
+def clipFeatures(params, job, convertFeaturesDuringClip=True):
 	global haveDataInterop
 	cleanUpFeatureLayer = False
 	# get the path and a validated name for the output
-	layerName, outputpath = makeOutputPath(False, lyr, convertFeaturesDuringClip, featureFormat, zipFolderPath, scratchFolderPath)
-	arcpy.AddMessage("Starting layer: %s where: %s" % (lyr, where))
+	layerName, outputpath = make_output_path(False, job['layer'], job['name'], convertFeaturesDuringClip, params.input_feature_format, params.zip_folder_path, params.scratch_folder_path, outputDataFolderName=params.output_folder_name)
+	arcpy.AddMessage("Starting layer: %s where: %s" % (job['layer'], job['where']))
 	feature_layer = layerName
 	
 	cleanUpFeatureLayer = True
 
 	try:
-		arcpy.MakeFeatureLayer_management(lyr, feature_layer)
-		arcpy.SelectLayerByAttribute_management(feature_layer, "NEW_SELECTION", where)
+		arcpy.MakeFeatureLayer_management(job['layer'], feature_layer)
+		arcpy.SelectLayerByAttribute_management(feature_layer, "NEW_SELECTION", job['where'])
 		count = int(arcpy.GetCount_management(feature_layer).getOutput(0))
 		
 	except:
-		arcpy.AddWarning("Select Attributes Error ::  Layer=%s; Clause=%s" % (feature_layer, where))
+		arcpy.AddWarning("Select Attributes Error ::  Layer=%s; Clause=%s" % (feature_layer, job['where']))
 		arcpy.AddWarning(arcpy.GetMessages(2))
 		return
 
 	if count == 0:
-		arcpy.AddWarning("Where clause yielded no records ::  Layer=%s; Clause=%s" % (feature_layer, where))
+		arcpy.AddWarning("Where clause yielded no records ::  Layer=%s; Clause=%s" % (feature_layer, job['where']))
 		return
 
 	try:
 
-		if projection:
+		if params.output_projection and params.output_projection in VALID_PROJECTION_ALIASES.keys():
 			arcpy.AddMessage('Ready to project: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
-			out_coordinate_system = os.path.join(PROJECTIONS_DIRECTORY, projection + '.prj')
+			out_coordinate_system = os.path.join(PROJECTIONS_DIRECTORY, VALID_PROJECTION_ALIASES[params.output_projection])
 			arcpy.Project_management(feature_layer, outputpath, out_coordinate_system)
-			arcpy.AddMessage('Project Complete')
 		else:
 			arcpy.AddMessage('Ready to copy: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
 			arcpy.CopyFeatures_management(feature_layer, outputpath)
-			arcpy.AddMessage('Copy Complete')
 
 		# if format needs data interop, convert with data interop
 		if not convertFeaturesDuringClip:
@@ -196,53 +205,31 @@ def clipFeatures(lyr, featureFormat, zipFolderPath, scratchFolderPath, convertFe
 		pass
 
 	except:
-		errorstring = arcpy.GetMessages(2)
-		arcpy.AddWarning(arcpy.GetMessages(0) + arcpy.GetMessages(1) + errorstring  + ' ERROR :: ' + feature_layer)
+		raise
 
 	finally:
 		if cleanUpFeatureLayer and arcpy.Exists(feature_layer):
 			arcpy.Delete_management(feature_layer)
 
 
-def clipAndConvert(layersToWhereClause, featureFormat, rasterFormat, projection=None):
+def clipAndConvert(params):
 	try:
+		params.zip_folder_path = create_folder_in_scratch(params.output_folder_name)
+		params.scratch_folder_path = create_folder_in_scratch("scratchfolder")
 
-		# for certain output formats we don't need to use Data Interop to do the conversion
-		convertFeaturesDuringClip = False
-		if featureFormat[1].lower() in ["gdb", "mdb", "shp"]:
-			convertFeaturesDuringClip = True
-
-		# get a scratch folder for temp data and a zip folder to hold
-		# the final data we want to zip and send
-		zipFolderPath = createFolderInScratch("zipfolder")
-		scratchFolderPath = createFolderInScratch("scratchfolder")
-
-		# loop through the list of layers recieved
-		for lyr, where in layersToWhereClause.items():
-			# temporary stop gap measure to counteract bug
-			if lyr.find(" ") > -1:
-				lyr = lyr.replace("'", "")
-
-			describe = arcpy.Describe(lyr)
+		for job in params.export_jobs:
+			describe = arcpy.Describe(job['layer'])
 			dataType = describe.DataType.lower()
 
-			# make sure we are dealing with features or raster and not some other layer type (group, tin, etc)
 			if dataType in ["featurelayer", "rasterlayer", "featureclass"]:
-				# if the coordinate system is the same as the input
-				# set the environment to the coord sys of the layer being clipped
-				# may not be necessary, but is a failsafe.
-
-				# raster branch
 				if dataType == "rasterlayer":
-					clipRaster(lyr, rasterFormat, zipFolderPath, scratchFolderPath)
-
-				# feature branch
+					clipRaster(job['layer'], params.input_raster_format, params.zip_folder_path, params.scratch_folder_path)
 				else:
-					clipFeatures(lyr, featureFormat, zipFolderPath, scratchFolderPath, convertFeaturesDuringClip, where=where, projection=projection)
+					clipFeatures(params, job)
 			else:
-				#Message "  Cannot clip layer: %s.  This tool does not clip layers of type: %s..."
-				arcpy.AddWarning(get_ID_message(86143) % (lyr, dataType))
-		return zipFolderPath
+				arcpy.AddWarning(get_ID_message(86143) % (source_path, dataType))
+
+		return params.zip_folder_path 
 
 	except:
 		errstring = get_ID_message(86144)#"Failure in clipAndConvert..\n"
@@ -265,45 +252,14 @@ def get_results_virtual_path(resultsFilePath):
 
 def run_export(params):
 	try:
-
-		layers = params.get_full_layer_pathes()
-		params.result_file = os.path.join(arcpy.env.scratchWorkspace, params.zipfile_name)
-		params.virtual_result_file = get_results_virtual_path(params.result_file)
-
-		if len(layers) != len(params.where_clauses):
-			msg = 'You must supply the same number of layers as where clauses or "*"'
-			arcpy.AddWarning(msg)
-			raise ValueError('You must supply the same number of layers as where clauses or "*"')
-
-		layers_to_where_clause = dict(zip(layers, params.where_clauses))
+		params.commit_properties()
 
 		if arcpy.CheckExtension("DataInteroperability") == "Available":
 			arcpy.CheckOutExtension("DataInteroperability")
 			haveDataInterop = True
 		else:
 			haveDataInterop = False
-		# Do a little internal validation.
-		# Expecting "long name - short name - extension
-		# If no format is specified, send features to GDB.
-		if not params.input_feature_format:
-			featureFormat = ["File Geodatabase", "GDB", ".gdb"]
-		else:
-			#featureFormat = inputFeatureFormat.split(" - ")
-			featureFormat = map(lambda x: x.strip(), params.input_feature_format.split("-"))
-			if len(featureFormat) < 3:
-				featureFormat.append("")
 
-		# If no format is specified, send rasters to GRID.
-		# Expecting "long name - short name - extension
-		if not params.input_raster_format:
-			rasterFormat = ["ESRI GRID", "GRID", ""]
-		else:
-			#rasterFormat = inputRasterFormat.split(" - ")
-			rasterFormat = map(lambda x: x.strip(), params.input_raster_format.split("-"))
-			if len(rasterFormat) < 3:
-				rasterFormat.append("")
-
-		# Do this so the tool works even when the scratch isn't set or if it is set to gdb/mdb/sde
 		if arcpy.env.scratchWorkspace is None or os.path.exists(str(arcpy.env.scratchWorkspace)) is False:
 			raise "Scratch workspace is None or doesn't exists"
 		else:
@@ -316,11 +272,10 @@ def run_export(params):
 				
 		arcpy.AddMessage("Scratch Workspace: %s" % arcpy.env.scratchWorkspace)
 
-		# clip and convert the layers and get the path to the folder we want to zip
-		zipFolder = clipAndConvert(layers_to_where_clause, featureFormat, rasterFormat, projection=params.output_projection)
+		zipFolder = clipAndConvert(params)
+		create_zipfile(zipFolder, params.result_file)
 
-		# zip the folder
-		zipUpFolder(zipFolder, params.result_file)
+		return params.result_file
 
 	except:
 		tb = sys.exc_info()[2]
@@ -329,105 +284,176 @@ def run_export(params):
 				str(sys.exc_type)+ ": " + str(sys.exc_value) + "\n"
 		arcpy.AddError(pymsg)
 
+def arcgis_parameter_bootstrap():
+
+	params = ToolParameters()
+
+	raw_layers = arcpy.GetParameterAsText(0)
+	params.load_layers(raw_layers)
+
+	raw_input_feature_format = arcpy.GetParameterAsText(1)
+	params.load_input_feature_format(raw_input_feature_format)
+
+	raw_input_raster_format = arcpy.GetParameterAsText(2)
+	params.load_input_raster_format(raw_input_raster_format)
+
+	params.output_projection = arcpy.GetParameterAsText(3)
+
+	raw_zipfile_name = arcpy.GetParameterAsText(4)
+	params.load_zip_file_name(raw_zipfile_name)
+
+	params.output_folder_name = arcpy.GetParameterAsText(5)
+	params.export_source_directory = arcpy.GetParameterAsText(6)
+
+	return params
 
 class ToolParameters(object):
 	'''value object for storing export tool parameters'''
 
 	def __init__(self):
 		self.layers = None
+		self.output_names = None
 		self.input_feature_format = None
 		self.input_raster_format = None
 		self.output_projection = None
 		self.where_clauses = None
 		self.zipfile_name = None
+		self.output_folder_name = None
 		self.export_source_directory = None
 		self.zipfile_path = None
+		self.export_jobs = []
 
 		self.valid_projections = ['WGS_1984']
 
-	def from_arc(self):
-		self.layers = arcpy.GetParameterAsText(0).split(";")
-		self.input_feature_format = arcpy.GetParameterAsText(1)
-		self.input_raster_format = arcpy.GetParameterAsText(2)
-		self.output_projection = arcpy.GetParameterAsText(3)
-		self.zipfile_name = arcpy.GetParameterAsText(4)
-
-		if not self.zipfile_name.endswith('.zip'):
-			self.zipfile_name += '.zip'
-
-		# input where clauses
-		where_clauses_text = arcpy.GetParameterAsText(6)
-		arcpy.AddMessage("Workspace: %s" % arcpy.workspace)
-		arcpy.SetParameterAsText(7, output_zip)
-		export_source_directory = arcpy.GetParameterAsText(8)
-
-		# use '*' or '1=1' to get all features from all layers
-		if not where_clauses_text or where_clauses_text in ['1=1', '*']:
-			self.where_clauses = [None] * len(self.layers)
-
-		# use 'all:' keyword to apply where clause to all layers in service
-		elif 'all:' in where_clauses_text:
-			where = where_clauses_text.split(':')[1]
-			self.where_clauses = [where] * len(self.layers)
-
-		# supply one where clause for each layer in corresponding order
+	def load_layers(self, rawInput):
+		layer_json = json.loads(rawInput)
+		if isinstance(layer_json, list) and isinstance(layer_json[0], dict):
+			self.export_jobs = layer_json
 		else:
-			self.where_clauses = filter(None, where_clauses_text.split(";"))
+			raise ValueError('Invalid layers property')
 
-		run_export(params)
+	def load_input_feature_format(self, raw_input_feature_format=None):
+		if not raw_input_feature_format:
+			self.input_feature_format = ["File Geodatabase", "GDB", ".gdb"]
+		else:
+			self.input_feature_format = map(lambda x: x.strip(), raw_input_feature_format.split("-"))
+			if len(self.input_feature_format) < 3:
+				self.input_feature_format.append("")
 
-	def get_full_layer_pathes(self):
-		return [os.path.join(self.export_source_directory, l) for l in self.layers]
+	def load_input_raster_format(self, raw_input_raster_format=None):
+		if not raw_input_raster_format:
+			self.input_raster_format = ["ESRI GRID", "GRID", ""]
+		else:
+			self.input_raster_format = map(lambda x: x.strip(), raw_input_raster_format.split("-"))
+			if len(self.input_raster_format) < 3:
+				self.input_raster_format.append("")
 
-class ExtractDataWhereTests(unittest.TestCase):
+	def load_zip_file_name(self, raw_zip_file_name):
+		if not raw_zip_file_name.endswith('.zip'):
+			self.zipfile_name = raw_zip_file_name + '.zip'
+		else:
+			self.zipfile_name = raw_zip_file_name
+
+	def commit_properties(self):
+		self.result_file = os.path.join(arcpy.env.scratchWorkspace, self.zipfile_name)
+		self.virtual_result_file = get_results_virtual_path(self.result_file) #TODO: FIX VIRTUAL DIRECTORY HACK
+
+		for job in self.export_jobs:
+			job['layer'] = os.path.join(self.export_source_directory, job['layer'])
+
+class Tests(unittest.TestCase):
+	'''
+	python -m unittest ExtractDataWhere.Tests.test_export_shp
+	'''
 	def setUp(self):
 		arcpy.env.scratchWorkspace = SCRATCH_FOLDER
 
 		self.params = ToolParameters()
-		self.params.layers = ['export_test_1', 'export_test_2']
-		self.params.input_feature_format = 'File Geodatabase - GDB - .gdb'
+		self.params.load_layers(self.create_mock_jobs_json())
+		self.params.load_input_feature_format('File Geodatabase - GDB - .gdb')
 		self.params.input_raster_format = None
 		self.params.output_projection = None
-		self.params.where_clauses = ["OBJECTID < 5","OBJECTID >= 5 AND OBJECTID < 10"]
-		self.params.zipfile_name = 'test_export_where'
+		self.params.load_zip_file_name('test_export_where')
+		self.params.output_folder_name = 'spatial_data_export'
 		self.params.export_source_directory = TEST_DATA_GDB
 		self.params.result_file = None
 
+		print '= = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = ='
+
 	def tearDown(self):
-		pass
+		self.params = None
 
-	def test_export_shapefile(self):
-		self.params.input_feature_format = 'Shapefile - SHP - .shp'
-		self.params.zipfile_name = 'test_export_shapefile'
+	def test_export_shp(self):
+		function_name = sys._getframe().f_code.co_name
+		self.params.load_zip_file_name(function_name)
+		self.params.output_folder_name  = function_name
+
+		self.params.load_input_feature_format('Shapefile - SHP - .shp')
+		
 		run_export(self.params)
 		self.assertTrue(os.path.exists(self.params.result_file))
 
-	def test_export_file_geodatabase(self):
-		self.params.input_feature_format = 'File Geodatabase - GDB - .gdb'
-		self.params.zipfile_name = 'test_export_file_geodatabase'
+	def test_export_fgdb(self):
+		function_name = sys._getframe().f_code.co_name
+		self.params.load_zip_file_name(function_name)
+		self.params.output_folder_name  = function_name
+
+		self.params.load_input_feature_format('File Geodatabase - GDB - .gdb')
 		run_export(self.params)
 		self.assertTrue(os.path.exists(self.params.result_file))
 
-	def test_export_wgs84_shapefile(self):
-		self.params.input_feature_format = 'Shapefile - SHP - .shp'
+	def test_export_wgs84_shp(self):
+		function_name = sys._getframe().f_code.co_name
+		self.params.load_zip_file_name(function_name)
+		self.params.output_folder_name  = function_name
+
+		self.params.load_input_feature_format('Shapefile - SHP - .shp')
 		self.params.output_projection = 'WGS_1984'
-		self.params.zipfile_name = 'test_export_wgs84_shapefile'
 		run_export(self.params)
-
 		self.assertTrue(os.path.exists(self.params.result_file))
 
-	def test_export_wgs84_file_geodatabase(self):
-		self.params.input_feature_format = 'File Geodatabase - GDB - .gdb'
+	def test_export_wgs84_fgdb(self):
+		function_name = sys._getframe().f_code.co_name
+		self.params.load_zip_file_name(function_name)
+		self.params.output_folder_name  = function_name
+
+		self.params.load_input_feature_format('File Geodatabase - GDB - .gdb')
 		self.params.output_projection = 'WGS_1984'
-		self.params.zipfile_name = 'test_export_wgs84_file_geodatabase'
 		run_export(self.params)
-
 		self.assertTrue(os.path.exists(self.params.result_file))
+
+	def test_setting_output_directory_name(self):
+		function_name = sys._getframe().f_code.co_name
+		self.params.load_zip_file_name(function_name)
+		self.params.output_folder_name  = function_name
+
+		self.params.input_feature_format = 'File Geodatabase - GDB - .gdb'
+		self.params.output_folder_name = 'TESTING_SETTING_DIRECTORY'
+		run_export(self.params)
+		self.assertTrue(os.path.exists(self.params.result_file))
+
+	def create_mock_jobs_json(self):
+		input_jobs = []
+
+		export_1 = {}
+		export_1['layer'] = 'export_test_1'
+		export_1['name'] = 'custom_made_name_1'
+		export_1['where'] = 'OBJECTID < 5'
+		input_jobs.append(export_1)
+
+		export_2 = {}
+		export_2['layer'] = 'export_test_2'
+		export_2['name'] = 'custom_made_name_2'
+		export_2['where'] = 'OBJECTID >= 5 AND OBJECTID < 10'
+		input_jobs.append(export_2)
+
+		print json.dumps(input_jobs)
+		return json.dumps(input_jobs)
 
 if __name__ == '__main__':
 	if arcpy.GetParameterAsText(0):
-		params = ToolParameters()
-		params.from_arc()
-		run_export(params)
+		params = arcgis_parameter_bootstrap()
+		params.result_file = run_export(params)
+		arcpy.SetParameterAsText(7, params.result_file)
 	else:
 		unittest.main()
