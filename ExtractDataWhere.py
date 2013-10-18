@@ -22,7 +22,6 @@ TEST_DATA_GDB = os.path.join(TEST_DATA_FOLDER, 'test_data.gdb')
 TEST_DATA_SHP = os.path.join(TEST_DATA_FOLDER, 'test_data_shp')
 
 # project info
-PROJECTIONS_DIRECTORY = os.path.join(os.path.dirname(__file__), 'projections')
 VALID_PROJECTION_ALIASES = {}
 VALID_PROJECTION_ALIASES['WGS_1984'] = 'WGS_1984.prj'
 VALID_PROJECTION_ALIASES['WGS1984'] = 'WGS_1984.prj'
@@ -177,7 +176,7 @@ def clipFeatures(params, job, convertFeaturesDuringClip=True):
 
 		if params.output_projection and params.output_projection in VALID_PROJECTION_ALIASES.keys():
 			arcpy.AddMessage('Ready to project: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
-			out_coordinate_system = os.path.join(PROJECTIONS_DIRECTORY, VALID_PROJECTION_ALIASES[params.output_projection])
+			out_coordinate_system = os.path.join(params.projection_directory, VALID_PROJECTION_ALIASES[params.output_projection])
 			arcpy.Project_management(feature_layer, outputpath, out_coordinate_system)
 		else:
 			arcpy.AddMessage('Ready to copy: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
@@ -304,6 +303,7 @@ def arcgis_parameter_bootstrap():
 
 	params.output_folder_name = arcpy.GetParameterAsText(5)
 	params.export_source_directory = arcpy.GetParameterAsText(6)
+	params.projection_directory = arcpy.GetParameterAsText(7)
 
 	return params
 
@@ -322,6 +322,7 @@ class ToolParameters(object):
 		self.export_source_directory = None
 		self.zipfile_path = None
 		self.export_jobs = []
+		self.projection_directory = None
 
 		self.valid_projections = ['WGS_1984']
 
@@ -357,6 +358,9 @@ class ToolParameters(object):
 	def commit_properties(self):
 		self.result_file = os.path.join(arcpy.env.scratchWorkspace, self.zipfile_name)
 		self.virtual_result_file = get_results_virtual_path(self.result_file) #TODO: FIX VIRTUAL DIRECTORY HACK
+
+		if not self.projection_directory:
+			self.projection_directory = os.path.join(os.path.dirname(__file__), 'projections')
 
 		for job in self.export_jobs:
 			job['layer'] = os.path.join(self.export_source_directory, job['layer'])
