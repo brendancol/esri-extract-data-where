@@ -9,7 +9,7 @@ import urllib
 import urlparse
 import unittest
 
-from extract_data_config import SCRATCH_FOLDER, TEST_DATA_GDB, TEST_DATA_SHP, PROJECTIONS_FOLDER, VALID_PROJECTION_ALIASES
+from extract_data_config import *
 
 class LicenseError(Exception):
 	pass
@@ -439,6 +439,6 @@ if __name__ == '__main__':
 	if arcpy.GetParameterAsText(0):
 		params = arcgis_parameter_bootstrap()
 		params.result_file = run_export(params)
-		arcpy.SetParameterAsText(7, virtual_result_file)
+		arcpy.SetParameterAsText(7, params.virtual_result_file)
 	else:
 		unittest.main()
