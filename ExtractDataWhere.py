@@ -259,7 +259,9 @@ def run_export(params):
 		zipFolder = clipAndConvert(params)
 		create_zipfile(zipFolder, params.result_file)
 
-		return params.result_file
+		messages = [] #TODO: Add in custom messages
+
+		return params.result_file, messages
 
 	except:
 		tb = sys.exc_info()[2]
@@ -341,8 +343,6 @@ class ToolParameters(object):
 
 	def commit_properties(self):
 		self.result_file = os.path.join(arcpy.env.scratchWorkspace, self.zipfile_name)
-		self.virtual_result_file = get_results_virtual_path(self.result_file) #TODO: FIX VIRTUAL DIRECTORY HACK
-
 		for job in self.export_jobs:
 			job['layer'] = os.path.join(self.export_source_directory, job['layer'])
 
@@ -438,7 +438,8 @@ class Tests(unittest.TestCase):
 if __name__ == '__main__':
 	if arcpy.GetParameterAsText(0):
 		params = arcgis_parameter_bootstrap()
-		params.result_file = run_export(params)
-		arcpy.SetParameterAsText(7, params.virtual_result_file)
+		params.result_file, messages = run_export(params)
+		arcpy.SetParameterAsText(7, params.result_file)
+		arcpy.SetParameterAsText(8, json.dumps(messages))
 	else:
 		unittest.main()
