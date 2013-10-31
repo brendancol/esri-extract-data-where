@@ -162,7 +162,11 @@ def clipFeatures(params, job, convertFeaturesDuringClip=True):
 		if params.output_projection and params.output_projection in VALID_PROJECTION_ALIASES.keys():
 			arcpy.AddMessage('Ready to project: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
 			out_coordinate_system = os.path.join(PROJECTIONS_FOLDER, VALID_PROJECTION_ALIASES[params.output_projection])
-			arcpy.Project_management(feature_layer, outputpath, out_coordinate_system)
+			in_memory_fc = arcpy.CreateUniqueName("temp_features", 'in_memory')
+
+			arcpy.CopyFeatures_management(feature_layer, in_memory_fc)
+			arcpy.Project_management(in_memory_fc, outputpath, out_coordinate_system)
+			arcpy.Delete_management(in_memory_fc)
 		else:
 			arcpy.AddMessage('Ready to copy: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
 			arcpy.CopyFeatures_management(feature_layer, outputpath)
@@ -227,12 +231,12 @@ def clipAndConvert(params):
 def get_ID_message(ID):
 	return re.sub("%1|%2", "%s", arcpy.GetIDMessage(ID))
 
-def get_results_virtual_path(resultsFilePath):
-	file_url = urlparse.urljoin('file:', urllib.pathname2url(resultsFilePath))
-	if 'directories' in file_url:
-		return SERVER_VIRTUAL_DIRECTORIES + file_url.split(r'directories')[1]
-	else:
-		return file_url
+# def get_results_virtual_path(resultsFilePath):
+# 	file_url = urlparse.urljoin('file:', urllib.pathname2url(resultsFilePath))
+# 	if 'directories' in file_url:
+# 		return SERVER_VIRTUAL_DIRECTORIES + file_url.split(r'directories')[1]
+# 	else:
+# 		return file_url
 
 def run_export(params):
 	try:
@@ -342,13 +346,16 @@ class ToolParameters(object):
 			self.zipfile_name = raw_zip_file_name
 
 	def commit_properties(self):
-		self.result_file = os.path.join(arcpy.env.scratchWorkspace, self.zipfile_name)
+		if not self.zipfile_name.endswith('.zip'):
+			self.zipfile_name += '.zip'
+			
+		self.result_file = arcpy.CreateUniqueName(self.zipfile_name, arcpy.env.scratchWorkspace)
 		for job in self.export_jobs:
 			job['layer'] = os.path.join(self.export_source_directory, job['layer'])
 
 class Tests(unittest.TestCase):
 	'''
-	python -m unittest ExtractDataWhere.Tests.test_export_shp
+	python -m unittest ExtractDataWhere.Tests.test_export_wgs84_fgdb
 	'''
 	def setUp(self):
 		arcpy.env.scratchWorkspace = SCRATCH_FOLDER
