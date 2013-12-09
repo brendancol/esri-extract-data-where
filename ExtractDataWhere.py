@@ -1,3 +1,11 @@
+# Esri start of added variables
+import os, arcpy
+# Esri end of added variables
+
+# Esri start of added imports
+import sys, os, arcpy
+# Esri end of added imports
+
 import arcpy
 import json
 import os
@@ -58,8 +66,10 @@ def zipws(path, zip, keep):
 
 def create_folder_in_scratch(folderName):
 	# create the folders necessary for the job
-	folderPath = arcpy.CreateUniqueName(folderName, arcpy.env.scratchWorkspace)
-	arcpy.CreateFolder_management(arcpy.env.scratchWorkspace, os.path.basename(folderPath))
+	scratch = arcpy.env.scratchWorkspace
+	#scratch = sys.path[0]
+	folderPath = arcpy.CreateUniqueName(folderName, scratch)
+	arcpy.CreateFolder_management(scratch, os.path.basename(folderPath))
 	return folderPath
 
 def get_temp_location_path(folderPath, format, outputDataFolderName='data'):
@@ -67,7 +77,7 @@ def get_temp_location_path(folderPath, format, outputDataFolderName='data'):
 	if format == "mdb":
 		MDBPath = os.path.join(folderPath, outputDataFolderName + ".mdb")
 		if not arcpy.Exists(MDBPath):
-			arcpy.CreatePersonalGDB_management(folderPath, outputDataFolderName)
+			arcpy.CreateFileGDB_management(folderPath, outputDataFolderName)
 		return MDBPath
 	elif format == "gdb":
 		GDBPath = os.path.join(folderPath, outputDataFolderName + ".gdb")
@@ -133,6 +143,19 @@ def clipRaster(lyr, rasterFormat, zipFolderPath, scratchFolderPath):
 			arcpy.AddWarning(arcpy.GetMessages(2))
 		pass
 
+def introspect_featureset(features, where):
+	message = []
+	desc = arcpy.Describe(features)
+	message.append('\n\nIntrospecting features {} WHERE {}'.format(features, where))
+	message.append('    Rows ({}):'.format(int(arcpy.GetCount_management(features).getOutput(0)))) 
+	message.append('    Data Source ({}):'.format(desc.catalogPath) )
+	with arcpy.da.SearchCursor(features, '*') as cursor:
+		for r in cursor:
+			message.append('    {}'.format(r))
+
+	arcpy.AddMessage('\n'.join(message))
+
+
 def clipFeatures(params, job, convertFeaturesDuringClip=True):
 	global haveDataInterop
 	cleanUpFeatureLayer = False
@@ -146,11 +169,13 @@ def clipFeatures(params, job, convertFeaturesDuringClip=True):
 	try:
 		arcpy.MakeFeatureLayer_management(job['layer'], feature_layer)
 		arcpy.SelectLayerByAttribute_management(feature_layer, "NEW_SELECTION", job['where'])
+		introspect_featureset(feature_layer, job['where'])
 		count = int(arcpy.GetCount_management(feature_layer).getOutput(0))
 		
 	except:
 		arcpy.AddWarning("Select Attributes Error ::  Layer=%s; Clause=%s" % (feature_layer, job['where']))
 		arcpy.AddWarning(arcpy.GetMessages(2))
+		raise
 		return
 
 	if count == 0:
@@ -342,6 +367,10 @@ class ToolParameters(object):
 			self.zipfile_name = raw_zip_file_name
 
 	def commit_properties(self):
+
+		if self.export_source_directory.lower().endswith('.sde'):
+			arcpy.ClearWorkspaceCache_management(self.export_source_directory)
+
 		self.result_file = os.path.join(arcpy.env.scratchWorkspace, self.zipfile_name)
 		for job in self.export_jobs:
 			job['layer'] = os.path.join(self.export_source_directory, job['layer'])
@@ -437,6 +466,7 @@ class Tests(unittest.TestCase):
 
 if __name__ == '__main__':
 	if arcpy.GetParameterAsText(0):
+		arcpy.AddMessage('HELLLO TESTING: YOU CAN DO IT!')
 		params = arcgis_parameter_bootstrap()
 		params.result_file, messages = run_export(params)
 		arcpy.SetParameterAsText(7, params.result_file)
