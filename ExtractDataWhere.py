@@ -1,11 +1,3 @@
-# Esri start of added variables
-import os, arcpy
-# Esri end of added variables
-
-# Esri start of added imports
-import sys, os, arcpy
-# Esri end of added imports
-
 import arcpy
 import json
 import os
@@ -169,7 +161,7 @@ def clipFeatures(params, job, convertFeaturesDuringClip=True):
 	try:
 		arcpy.MakeFeatureLayer_management(job['layer'], feature_layer)
 		arcpy.SelectLayerByAttribute_management(feature_layer, "NEW_SELECTION", job['where'])
-		introspect_featureset(feature_layer, job['where'])
+		#introspect_featureset(feature_layer, job['where'])
 		count = int(arcpy.GetCount_management(feature_layer).getOutput(0))
 		
 	except:
@@ -187,11 +179,7 @@ def clipFeatures(params, job, convertFeaturesDuringClip=True):
 		if params.output_projection and params.output_projection in VALID_PROJECTION_ALIASES.keys():
 			arcpy.AddMessage('Ready to project: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
 			out_coordinate_system = os.path.join(PROJECTIONS_FOLDER, VALID_PROJECTION_ALIASES[params.output_projection])
-			in_memory_fc = arcpy.CreateUniqueName("temp_features", 'in_memory')
-
-			arcpy.CopyFeatures_management(feature_layer, in_memory_fc)
-			arcpy.Project_management(in_memory_fc, outputpath, out_coordinate_system)
-			arcpy.Delete_management(in_memory_fc)
+			arcpy.Project_management(feature_layer, outputpath, out_coordinate_system)
 		else:
 			arcpy.AddMessage('Ready to copy: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
 			arcpy.CopyFeatures_management(feature_layer, outputpath)
@@ -256,12 +244,12 @@ def clipAndConvert(params):
 def get_ID_message(ID):
 	return re.sub("%1|%2", "%s", arcpy.GetIDMessage(ID))
 
-# def get_results_virtual_path(resultsFilePath):
-# 	file_url = urlparse.urljoin('file:', urllib.pathname2url(resultsFilePath))
-# 	if 'directories' in file_url:
-# 		return SERVER_VIRTUAL_DIRECTORIES + file_url.split(r'directories')[1]
-# 	else:
-# 		return file_url
+def get_results_virtual_path(resultsFilePath):
+	file_url = urlparse.urljoin('file:', urllib.pathname2url(resultsFilePath))
+	if 'directories' in file_url:
+		return SERVER_VIRTUAL_DIRECTORIES + file_url.split(r'directories')[1]
+	else:
+		return file_url
 
 def run_export(params):
 	try:
@@ -371,24 +359,17 @@ class ToolParameters(object):
 			self.zipfile_name = raw_zip_file_name
 
 	def commit_properties(self):
-<<<<<<< HEAD
 
 		if self.export_source_directory.lower().endswith('.sde'):
 			arcpy.ClearWorkspaceCache_management(self.export_source_directory)
 
 		self.result_file = os.path.join(arcpy.env.scratchWorkspace, self.zipfile_name)
-=======
-		if not self.zipfile_name.endswith('.zip'):
-			self.zipfile_name += '.zip'
-			
-		self.result_file = arcpy.CreateUniqueName(self.zipfile_name, arcpy.env.scratchWorkspace)
->>>>>>> 3d2901d2228b6804a5ae80fae7826992994e3cd8
 		for job in self.export_jobs:
 			job['layer'] = os.path.join(self.export_source_directory, job['layer'])
 
 class Tests(unittest.TestCase):
 	'''
-	python -m unittest ExtractDataWhere.Tests.test_export_wgs84_fgdb
+	python -m unittest ExtractDataWhere.Tests.test_export_shp
 	'''
 	def setUp(self):
 		arcpy.env.scratchWorkspace = SCRATCH_FOLDER
@@ -477,7 +458,6 @@ class Tests(unittest.TestCase):
 
 if __name__ == '__main__':
 	if arcpy.GetParameterAsText(0):
-		arcpy.AddMessage('HELLLO TESTING: YOU CAN DO IT!')
 		params = arcgis_parameter_bootstrap()
 		params.result_file, messages = run_export(params)
 		arcpy.SetParameterAsText(7, params.result_file)
