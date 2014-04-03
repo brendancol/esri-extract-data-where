@@ -100,14 +100,16 @@ def make_output_path(raster, inLayerName, outLayerName, convert, formatList, zip
 	# make the output path
 	tmpName = os.path.basename(arcpy.CreateUniqueName(outLayerName, outwkspc))
 	tmpName = arcpy.ValidateTableName(tmpName, outwkspc)
+	
 
 	# do some extension housekeeping.
 	# Raster formats and shp always need to put the extension at the end
-	if raster or outFormat == "shp":
+	if raster or outFormat in ["shp", "xls"]:
 		if outFormat != "gdb" and outFormat != "mdb" and outFormat != "grid":
 			tmpName += formatList[2].lower()
 
 	outputpath = os.path.join(outwkspc, tmpName)
+	print tmpName
 
 	return tmpName, outputpath
 
@@ -157,9 +159,21 @@ def clipFeatures(params, job, convertFeaturesDuringClip=True):
 	feature_layer = layerName
 	
 	cleanUpFeatureLayer = True
+	fieldInfo = ""
+
+	if 'fields' in job.keys() and job['fields'] != ['*'] and job['fields'] != '*':
+		print 'filtering fields...'
+		valid_fields = job['fields']
+		layer_fields = arcpy.ListFields(job['layer'])
+		for field in layer_fields:
+			if field.name in valid_fields:
+				fieldInfo += field.name + " " + field.name + " VISIBLE;"
+			else:
+				fieldInfo += field.name + " " + field.name + " HIDDEN;"
+		print fieldInfo
 
 	try:
-		arcpy.MakeFeatureLayer_management(job['layer'], feature_layer)
+		arcpy.MakeFeatureLayer_management(job['layer'], feature_layer, "", "", fieldInfo)
 		arcpy.SelectLayerByAttribute_management(feature_layer, "NEW_SELECTION", job['where'])
 		#introspect_featureset(feature_layer, job['where'])
 		count = int(arcpy.GetCount_management(feature_layer).getOutput(0))
@@ -175,6 +189,12 @@ def clipFeatures(params, job, convertFeaturesDuringClip=True):
 		return
 
 	try:
+
+		if outputpath.endswith('.xls'):
+			temp_path = os.path.join('in_memory', layerName.replace('.xls',''))
+			arcpy.CopyFeatures_management(feature_layer, temp_path)
+			arcpy.TableToExcel_conversion(temp_path, outputpath)
+			return
 
 		if params.output_projection and params.output_projection in VALID_PROJECTION_ALIASES.keys():
 			arcpy.AddMessage('Ready to project: feature_layer=%s; outputpath=%s' % (feature_layer, outputpath))
@@ -344,6 +364,8 @@ class ToolParameters(object):
 			if len(self.input_feature_format) < 3:
 				self.input_feature_format.append("")
 
+		print self.input_feature_format
+
 	def load_input_raster_format(self, raw_input_raster_format=None):
 		if not raw_input_raster_format:
 			self.input_raster_format = ["ESRI GRID", "GRID", ""]
@@ -369,7 +391,7 @@ class ToolParameters(object):
 
 class Tests(unittest.TestCase):
 	'''
-	python -m unittest ExtractDataWhere.Tests.test_export_shp
+	python -m unittest ExtractDataWhere.Tests.test_export_csv
 	'''
 	def setUp(self):
 		arcpy.env.scratchWorkspace = SCRATCH_FOLDER
@@ -408,12 +430,12 @@ class Tests(unittest.TestCase):
 		run_export(self.params)
 		self.assertTrue(os.path.exists(self.params.result_file))
 
-	def test_export_csv(self):
+	def test_export_xls(self):
 		function_name = sys._getframe().f_code.co_name
 		self.params.load_zip_file_name(function_name)
 		self.params.output_folder_name  = function_name
 
-		self.params.load_input_feature_format('Comma Separated Values - CSV - .csv')
+		self.params.load_input_feature_format('Excel File - XLS - .xls')
 		run_export(self.params)
 		self.assertTrue(os.path.exists(self.params.result_file))
 
@@ -454,6 +476,7 @@ class Tests(unittest.TestCase):
 		export_1['layer'] = 'export_test_1'
 		export_1['name'] = 'custom_made_name_1'
 		export_1['where'] = 'OBJECTID < 5'
+		export_1['fields'] = ['CC']
 		input_jobs.append(export_1)
 
 		export_2 = {}
@@ -461,6 +484,13 @@ class Tests(unittest.TestCase):
 		export_2['name'] = 'custom_made_name_2'
 		export_2['where'] = 'OBJECTID >= 5 AND OBJECTID < 10'
 		input_jobs.append(export_2)
+
+		export_3 = {}
+		export_3['layer'] = 'export_test_2'
+		export_3['name'] = 'custom_made_name_3'
+		export_3['where'] = 'OBJECTID >= 5 AND OBJECTID < 10'
+		export_3['fields'] = ['*']
+		input_jobs.append(export_3)
 
 		print json.dumps(input_jobs)
 		return json.dumps(input_jobs)

@@ -28,3 +28,7 @@ You need to first run the extract_data_where tool in ArcMap or ArcCatalog and pu
 *Value:* browse to workspace
 
 Set the scratchWorkspace environment variable from the *Environments...* tab to the *scratch* folder next to the extract toolbox.
+
+
+## Feature Format: ##
+*Constants:* 'Shapefile - SHP - .shp', 'File Geodatabase - GDB - .gdb', 'Excel File - XLS - .xls'
