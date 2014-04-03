@@ -408,6 +408,15 @@ class Tests(unittest.TestCase):
 		run_export(self.params)
 		self.assertTrue(os.path.exists(self.params.result_file))
 
+	def test_export_csv(self):
+		function_name = sys._getframe().f_code.co_name
+		self.params.load_zip_file_name(function_name)
+		self.params.output_folder_name  = function_name
+
+		self.params.load_input_feature_format('Comma Separated Values - CSV - .csv')
+		run_export(self.params)
+		self.assertTrue(os.path.exists(self.params.result_file))
+
 	def test_export_wgs84_shp(self):
 		function_name = sys._getframe().f_code.co_name
 		self.params.load_zip_file_name(function_name)
